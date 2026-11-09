@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Doppler Locator</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="top">
+  <span class="brand">Doppler locator</span>
+  <button id="project-btn" title="All projects">
+    <span id="project-name">Projects</span><span id="project-meta"></span><span class="caret">▾</span>
+  </button>
+  <nav id="steps" aria-label="Steps">
+    <button data-step="recording" disabled><b>1</b>Recording<span class="tick"></span></button>
+    <button data-step="passes" disabled><b>2</b>Passes<span class="tick"></span></button>
+    <button data-step="flights" disabled><b>3</b>Flights<span class="tick"></span></button>
+    <button data-step="search" disabled><b>4</b>Search<span class="tick"></span></button>
+    <button data-step="locations" disabled><b>5</b>Locations<span class="tick"></span></button>
+  </nav>
+  <div id="status-area">
+    <div id="activity" role="status" hidden><span class="spinner"></span><span id="activity-text"></span></div>
+    <div id="job-banner" hidden><span class="spinner"></span><span id="job-text"></span><button id="job-stop" title="Stop this step, to change something and run it again">Stop</button></div>
+  </div>
+</header>
+
+<main id="pages">
+  <!-- Projects ------------------------------------------------------------------------------ -->
+  <section id="page-projects" class="page" hidden>
+    <div class="pane">
+      <div class="pane-head">
+        <h2>Projects</h2>
+        <input id="project-filter" type="search" placeholder="Filter by name or date" aria-label="Filter projects">
+        <span class="spacer"></span>
+        <button class="primary" id="new-project">New project</button>
+      </div>
+      <p class="hint">A project is one recording: the audio file, the UTC day it was made and the area to search.
+        Tests (a known location) show how the search did: the rank of the first candidate within 1 km of it.</p>
+      <div class="scroll">
+        <table id="project-table" class="data">
+          <thead><tr><th>Project</th><th>Recorded</th><th>Length</th><th>Passes</th><th>Flights</th>
+            <th>Start</th><th>Best candidate</th><th title="Rank of the first candidate within 1 km of the known location">Known spot</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 1 Recording --------------------------------------------------------------------------- -->
+  <section id="page-recording" class="page" hidden>
+    <div class="cols cols-side-left">
+      <div class="pane">
+        <div class="pane-head"><h2>Recording</h2>
+          <details class="help"><summary>?</summary><div class="pop">
+            <p>The audio file, the day it was recorded (UTC) and the area to search. The start time is not needed,
+              the search finds it, but if you know it (a camera's clock, a call log) set it: then every pass you
+              haven't rejected votes for places, a single pass can be enough, and pairs are pinned down much harder.</p>
+            <p>Click the map to move the area's centre, then save. Or search a shape: pick a country or US state,
+              or press <b>Draw on map</b> and click its corners (double-click to finish). The search leaves out
+              whatever lies outside it, so a smaller shape means fewer wrong places to confuse it with.</p>
+          </div></details>
+        </div>
+        <div class="scroll">
+          <form id="settings-form" class="stack-form"></form>
+        </div>
+        <div class="actions">
+          <button id="save-settings">Save changes</button>
+          <button class="primary" data-job="prepare">Make spectrogram</button>
+        </div>
+        <div class="job" data-job-status="prepare"></div>
+      </div>
+      <div class="pane flush"><div id="area-map" class="map"></div></div>
+    </div>
+  </section>
+
+  <!-- 2 Passes ------------------------------------------------------------------------------ -->
+  <section id="page-passes" class="page" hidden>
+    <div class="cols cols-side-right">
+      <div class="pane">
+        <div class="toolbar">
+          <button class="primary" data-job="detect">Find passes</button>
+          <button id="trace-toggle">Trace by hand</button>
+          <button id="listen-toggle" title="Listen: with this on, click the spectrogram to play the recording from there" aria-label="Listen"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M3 9v6h4l5 4V5L7 9H3z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/></svg></button>
+          <span class="hint" id="listen-hint" hidden></span>
+          <span id="trace-tools" hidden>
+            <button id="trace-measure" class="primary">Measure from points</button>
+            <button id="trace-clear">Clear</button>
+            <span class="hint" id="trace-hint">Click along the curve, from start to end.</span>
+          </span>
+          <span class="spacer"></span>
+          <button id="hide-curves" title="Hide every curve and label to see the spectrogram underneath (H; hold Space to peek)">Hide curves</button>
+          <label id="cand-overlay-label" class="check" hidden><input type="checkbox" id="cand-overlay" checked>
+            <span id="cand-overlay-text"></span></label>
+          <label class="check">Brightness <input type="range" class="vmax" min="4" max="30" value="14"></label>
+          <button id="zoom-all">Whole recording</button>
+          <details class="help"><summary>?</summary><div class="pop">
+            <p>Passes are found automatically and sorted by how much they look like a plane the search can
+              explain. Accept the ones to search with, reject the rest, or trace a curve yourself.</p>
+            <p><b>Accept only what you're sure is a plane</b>: a wrong pass sends the search to the wrong place,
+              so leave doubtful lines on ?. Keep two or three long, straight passes (the clean S of a plane flying
+              past): the search starts from those. Turning planes are common near airfields; accept them if you're
+              sure, but their speed and distance come out too low, so they can't carry a search on their own.
+              Trace the whole curve, flat ends included, and stay on one curve where two cross. The README's
+              <i>Good traces matter most</i> has more.</p>
+            <p>Scroll to zoom time, shift+scroll to zoom frequency, drag to pan, click a curve to select it.
+              Keys: ↑/↓ previous/next pass, A accept, U undecided, R reject, H hide or show the curves, hold
+              Space to hide them while held.</p>
+            <p>Press the speaker, then click the spectrogram to hear the recording from there, with a line following
+              the sound. Press it again to stop.</p>
+            <p>For any pass, <b>Show harmonics</b> in its details draws its traced line at multiples of its pitch, to check against what is bright there, and the points you place while tracing too. A line with at least two harmonics found is sharpened with them when measured. Lines that are harmonics of another pass aren't listed: its details link to them.</p>
+            <p>Confidence is how well a straight, steady pass fits the line, so turning planes score low. With the
+              start time known, the search also matches every pass with the flights' real tracks: the Flights
+              column is the share of the line the best flight follows anywhere in the area, turns and all.
+              A line no flight follows is a bird, a vehicle or a plane without ADS-B.</p>
+            <p>Once there are results, the selected candidate's modelled curves (step 5) are drawn solid in each
+              pass's colour, so you can see which passes it explains.</p>
+          </div></details>
+        </div>
+        <div class="job" data-job-status="detect"></div>
+        <div id="overview" class="spec strip"></div>
+        <div id="spectro" class="spec fill"></div>
+      </div>
+      <aside class="pane">
+        <div class="pane-head"><h3 id="pass-count">Passes</h3><span class="spacer"></span>
+          <span class="seg small" id="pass-sort">
+            <button data-sort="confidence" class="sel">Confidence</button><button data-sort="flights">Flights</button><button data-sort="time">Time</button>
+          </span>
+        </div>
+        <div class="scroll">
+          <table id="pass-table" class="data compact">
+            <thead><tr><th>Pass</th><th>Looks like</th><th>Heard</th>
+              <th title="Share of the traced line the best flight follows, anywhere in the area at the known start (from the last search)">Flights</th><th>Use?</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="pass-detail" class="detail"></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- 3 Flights ----------------------------------------------------------------------------- -->
+  <section id="page-flights" class="page" hidden>
+    <div class="cols cols-side-left">
+      <div class="pane">
+        <div class="pane-head"><h2>Flights</h2></div>
+        <p class="hint">ADS-B tracks for the recording's day from adsb.lol (about 4 GB, kept for reuse), cut down
+          to the area to search plus the distance a plane can be heard from.</p>
+        <div id="flights-summary"></div>
+        <div class="actions"><button class="primary" data-job="fetch">Get flight data</button></div>
+        <div class="job" data-job-status="fetch"></div>
+        <div class="pane-head"><h3 id="fl-count">In the area</h3></div>
+        <div class="scroll">
+          <table id="fl-table" class="data compact">
+            <thead><tr><th></th><th>Aircraft</th><th>Type</th><th title="Above sea level (GNSS where reported)">Altitude</th>
+              <th>Speed</th><th title="From the known location, or the area's centre">Away</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="pane flush flights-pane">
+        <div id="flights-map" class="map"></div>
+        <div class="time-bar">
+          <button id="fl-play" title="Play (Space)">▶</button>
+          <select id="fl-speed" aria-label="Speed"><option value="10">×10</option><option value="30" selected>×30</option>
+            <option value="120">×120</option></select>
+          <div class="time-track">
+            <input type="range" id="fl-time" min="0" max="1" step="1" value="0" aria-label="Time">
+            <div id="fl-ticks"></div>
+          </div>
+          <span id="fl-clock"></span>
+          <label class="check">Trails <select id="fl-trail"><option value="120">2 min</option>
+            <option value="300" selected>5 min</option><option value="600">10 min</option></select></label>
+          <label class="check" title="The search leaves jets out"><input type="checkbox" id="fl-jets"> Jets</label>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 Search ------------------------------------------------------------------------------ -->
+  <section id="page-search" class="page" hidden>
+    <div class="cols cols-side-left">
+      <div class="pane">
+        <div class="pane-head"><h2>Search</h2>
+          <details class="help"><summary>?</summary><div class="pop">
+            <p>Every pair of accepted passes is searched against the flights; with more than two, pairs are
+              ranked by how much of both traced lines their best flights follow.</p>
+            <p>With the recording's start time set, every pass you haven't rejected also votes for the places
+              where a flight explains it: real passes agree on one place, false ones (birds, vehicles, planes
+              missing from the flight data) scatter.</p>
+          </div></details>
+        </div>
+        <div class="scroll">
+          <div id="search-passes"></div>
+          <form id="search-form" class="stack-form"></form>
+        </div>
+        <div class="actions">
+          <button id="save-search">Save changes</button>
+          <button class="primary" data-job="search">Run search</button>
+        </div>
+        <div class="job" data-job-status="search"></div>
+      </div>
+      <div class="pane">
+        <div class="pane-head"><h3>Last search</h3></div>
+        <div class="scroll" id="search-last"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 Locations --------------------------------------------------------------------------- -->
+  <section id="page-locations" class="page" hidden>
+    <div class="loc">
+      <div class="pane loc-cands">
+        <div class="pane-head"><h3>Candidates</h3><span class="spacer"></span>
+          <button data-job="explain" title="Check every candidate against the current passes again (after accepting or rejecting some)">Re-check passes</button>
+          <details class="help"><summary>?</summary><div class="pop">
+            <p>Candidate spots, ranked by how many passes their place and start time explain (the accepted ones,
+              or every voting pass when the start is known) plus, when the start is known, how many flights are
+              heard there on the spectrogram (S1, S2...: their curves gather its peaks, traced or not). The right answer should account for most real passes,
+              not just the ones it was found from.</p>
+            <p>Pick one to see, for every pass it explains, the flight and its modelled curve on the
+              spectrogram, then mark it right or wrong. Click a selected candidate or flight again (or press Esc)
+              to unselect it; the button under the zoom shows the map full screen.</p>
+            <p><b>Conf.</b> is how likely a spot is right, to within about a kilometre, from its lead over the best
+              spot elsewhere and the share of accepted passes it explains.</p>
+            <p>Click the map to check any spot in the area as a candidate, with its own confidence and curves. Keep
+              it to hold on to it: otherwise the next click replaces it.</p>
+            <p><b>Fits?</b> is your check of each curve at this candidate only, and ranks the candidates again at
+              once: Yes counts the pass in full, ? half, No not at all. To stop using a pass everywhere, reject it
+              in step 2, then re-check.</p>
+          </div></details>
+        </div>
+        <div class="job" data-job-status="explain"></div>
+        <div id="loc-coverage"></div>
+        <div class="scroll">
+          <table id="cand-table" class="data compact">
+            <thead><tr><th>#</th><th title="How likely this spot is right, to within about a kilometre">Conf.</th><th title="Passes this place and start explain (a flight follows at least 60% of the traced line)">Explains</th>
+              <th title="Flights heard there on the spectrogram (stacking): their curves gather its peaks">Heard</th>
+              <th>Found from</th><th>Started</th><th id="truth-col">To known</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="pane loc-explains">
+        <div class="pane-head"><h3 id="explains-title">Passes</h3><span class="spacer"></span>
+          <label class="check"><input type="checkbox" id="show-partial"> partial matches too</label>
+        </div>
+        <div id="explains-note" class="hint"></div>
+        <div class="scroll">
+          <table id="explains-table" class="data compact">
+            <thead><tr><th></th><th>Pass</th><th title="Share of the traced line the flight's modelled curve follows">Fit</th>
+              <th>Flight</th><th>Closest</th><th title="Compare the curve with the traced line by eye. Your answer holds for this candidate only and ranks the candidates again at once. Faded: the automatic grade.">Fits?</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="pane flush loc-map"><div id="locations-map" class="map"></div></div>
+      <div class="pane loc-specs">
+        <div class="toolbar">
+          <span class="seg" id="spec-mode">
+            <button data-mode="each" class="sel">Each pass</button><button data-mode="one">Whole recording</button>
+          </span>
+          <span class="legend"><i class="sw-curve"></i> modelled for the flight at this spot
+            <i class="sw-line"></i> traced line</span>
+          <span class="spacer"></span>
+          <label class="check">Brightness <input type="range" class="vmax" min="4" max="30" value="14"></label>
+          <button id="open-in-passes" disabled title="Show the selected pass in step 2">Open in Passes</button>
+        </div>
+        <div id="spec-each" class="spec-grid"></div>
+        <div id="spec-one" hidden>
+          <div id="loc-overview" class="spec strip"></div>
+          <div id="loc-spectro" class="spec fill"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="page-empty" class="page" hidden>
+    <div class="pane center">
+      <h2>No project yet</h2>
+      <p class="hint">A project is one recording: the audio file, the UTC date it was made, and the area to search.</p>
+      <button class="primary" id="empty-new">New project</button>
+    </div>
+  </section>
+</main>
+
+<dialog id="new-dialog">
+  <form method="dialog" id="new-form" class="grid-form">
+    <h2>New project</h2>
+    <label>Name <input name="name" required pattern="[A-Za-z0-9][A-Za-z0-9_\-]*" placeholder="garden-2026-11-02"></label>
+    <label>Audio or video file <span class="input-row"><input name="audio" required placeholder="path on this computer, or Browse"><button type="button" id="browse-open">Browse…</button></span></label>
+    <label>Date recorded (UTC) <input name="date" type="date" required></label>
+    <label>Centre of the area to search (lat, lon) <input name="centre" required placeholder="40.84, -73.60"></label>
+    <label>Search this far each way (km) <input name="half_km" type="number" step="any" value="25"></label>
+    <label>Microphone height (m) <input name="mic_height" type="number" step="any" value="2"></label>
+    <label>Known location, for tests (lat, lon) <input name="truth" placeholder="optional"></label>
+    <p class="error" id="new-error"></p>
+    <div class="actions">
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button value="ok" class="primary" id="new-ok">Create</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="browse-dialog">
+  <div class="browse">
+    <h2>Open a recording</h2>
+    <div class="input-row"><select id="browse-roots" aria-label="Drive" hidden></select>
+      <input id="browse-path" aria-label="Folder"><button type="button" id="browse-go">Go</button><button type="button" id="browse-up" title="Up one folder">Up</button></div>
+    <p class="error" id="browse-error"></p>
+    <ul id="browse-list" class="browse-list"></ul>
+    <div class="actions"><button type="button" id="browse-cancel">Cancel</button></div>
+  </div>
+</dialog>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

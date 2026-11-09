@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+out/
+# Recordings, downloads and projects stay on your computer; only the video test's project is shared.
+data/*
+!data/projects/
+data/projects/*
+!data/projects/video-test/
+data/projects/video-test/*
+!data/projects/video-test/project.json
