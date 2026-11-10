@@ -30,7 +30,7 @@ def _ranked(cands, **state):
 
 
 def test_without_verdicts_candidates_rank_by_the_share_each_flight_follows():
-    a, b = _ranked([_cand(1.0, 0.7, 0.2), _cand(2.0, 0.9, 0.8)])
+    a, b = _ranked([_cand(1.0, 0.7, 0.2), _cand(2.0, 0.9, 0.8)], passes=_passes("P0", "P1"))
     assert (a["lat"], a["combined"], a["explained"]) == (2.0, 1.7, 2)
     assert (b["lat"], b["combined"], b["explained"]) == (1.0, 0.9, 1)
     assert [x["status"] for x in b["explains"]] == ["accepted", "undecided"]
@@ -67,6 +67,13 @@ def test_a_clear_lead_explaining_every_accepted_pass_is_trusted():
     a, b = _ranked([_cand(1.0, 0.95, 0.95, 0.95), _cand(2.0, 0.7, 0.2, 0.0)], passes=_passes("P0", "P1", "P2"))
     assert a["lat"] == 1.0 and a["confidence"] > 0.9
     assert b["confidence"] < 0.05
+
+
+def test_one_pass_explained_alone_is_never_shown_as_sure():
+    a, b = _ranked([_cand(1.0, 0.95), _cand(2.0, 0.6)], passes=_passes("P0"))
+    assert a["lat"] == 1.0 and 0.5 < a["confidence"] < 0.9
+    many, _ = _ranked([_cand(1.0, 0.95, 0.95), _cand(2.0, 0.6, 0.6)], passes=_passes("P0", "P1"))
+    assert many["confidence"] > 0.9
 
 
 def test_two_spots_with_the_same_evidence_cannot_both_be_sure():
@@ -117,9 +124,30 @@ def test_tracing_a_heard_flight_adds_evidence():
     assert _ranked([traced])[0]["combined"] > _ranked([heard_only])[0]["combined"]
 
 
-def test_a_partial_match_does_not_stop_a_flight_counting_as_heard():
+def test_a_flight_partly_following_a_pass_and_heard_counts_as_one_piece_of_evidence():
     c = dict(_cand(1.0, 0.3), heard=[_heard("F0")])
-    assert _ranked([c])[0]["combined"] == 0.8
+    assert _ranked([c], passes=_passes("P0"))[0]["combined"] == 0.5
+
+
+def test_a_good_fit_beats_a_poor_fit_on_a_flight_that_is_also_heard():
+    good, poor = _cand(1.0, 0.92), dict(_cand(2.0, 0.43), heard=[_heard("F0")])
+    assert _ranked([poor, good], passes=_passes("P0"))[0]["lat"] == 1.0
+
+
+def test_a_faint_match_to_a_pass_nobody_accepted_counts_for_nothing():
+    a, b = _ranked([_cand(1.0, 0.94, 0.08), _cand(2.0, 0.87, 0.12)], passes=_passes("P0"))
+    assert (a["lat"], a["combined"]) == (1.0, 0.94) and b["combined"] == 0.87
+
+
+def test_a_pass_nobody_accepted_still_counts_where_a_flight_explains_it():
+    [r] = _ranked([_cand(1.0, 0.9, 0.7)], passes=_passes("P0"))
+    assert r["combined"] == 1.6
+
+
+def test_refining_keeps_to_a_known_start_only_when_it_is_tighter_than_the_refining_slack(tmp_path):
+    assert _project(tmp_path, start_unix=1000.0, start_tol_s=2.0)._start_within(10.0) == (1000.0, 2.0)
+    assert _project(tmp_path, start_unix=1000.0, start_tol_s=60.0)._start_within(10.0) is None
+    assert _project(tmp_path)._start_within(10.0) is None
 
 
 def test_saying_a_curve_does_not_fit_also_stops_that_flight_counting_as_heard():

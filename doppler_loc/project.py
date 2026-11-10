@@ -42,6 +42,9 @@ STACK_CAP, STACK_FLOOR = 6.0, 2.0  # each heard flight adds at most cap - floor 
 # pair ranked 2nd by evidence but 5th by curve score, and on a 500 m grid it fell outside the top 3 either way.
 KEEP_START_KNOWN, KEEP_NO_START = 10, 30
 REFINE_START_TOL = 10.0  # s either side of the start a pass's search found, when refining it
+GROUP_SHIFT_S = 10.0  # the most a group's joint refining moves the start
+REFINE_PLACE_DRIFT_S = 8.0  # how far `stack.refine_place` can walk the start: two steps of up to 4 s
+FINE_VOTE_START_S = 6.0  # s either side of the start a place was voted for, when voting again on a fine grid
 # Candidates resting on the same evidence are one answer (`Project._group`) when this close, in m and s.
 GROUP_DIST_M, GROUP_START_S = 1500.0, 8.0
 # From this far each way an area is wide: flight data is cut down to what can be heard (a day's
@@ -170,6 +173,11 @@ HEARD_WEIGHT = 0.5
 # each recording held out in turn, all 41 candidates above 90% were right and none of 529 below 10%,
 # but three of the 19 top candidates were wrong, at 23%, 47% and 89%.
 CONF_BASE, CONF_LEAD, CONF_EXPLAINED = -3.3, 3.0, 5.9
+# The same, for a search with a single accepted pass, which can't tell one side of its flight's track
+# from the other: explaining it says much less. Fitted on 108 candidates of 24 one-pass searches of
+# 24 recordings, all at one site; with each held out in turn none of the 24 top candidates reached 90%,
+# and the right ones averaged 58% against 54% for the wrong, so one pass is never shown as sure.
+CONF_ONE_PASS = -1.5, 2.35, 1.3
 
 
 def fit_key(pass_id, flight) -> str:
@@ -183,15 +191,19 @@ def rank_candidates(results, state: dict):
 
     A pass counts the share of its line the flight follows, unless its curve was judged by hand at
     this candidate: in full when it fits, half that share when unsure, nothing when it doesn't. A
-    heard flight counts `HEARD_WEIGHT` by whether its curve shows on the spectrogram: all of that
-    when it does (graded "visible"), half its stacked evidence when unsure, nothing when it doesn't,
-    and in full if a person says it shows. Results from before grading count each by its stacked
-    evidence. One flight is one piece of evidence: one that explains a pass, or whose curve for a
-    pass has been judged by hand, counts as that alone.
+    pass nobody accepted counts only where a flight explains it: faint matches to doubtful passes
+    are noise, and added up they decide close calls. A heard flight counts `HEARD_WEIGHT` by whether
+    its curve shows on the spectrogram: all of that when it does (graded "visible"), half its stacked
+    evidence when unsure, nothing when it doesn't, and in full if a person says it shows. Results
+    from before grading count each by its stacked evidence. One flight is one piece of evidence: one
+    that explains a pass, or whose curve for a pass has been judged by hand, counts as that alone,
+    and one that partly follows a pass adds only what being heard gives beyond that, or a poor fit
+    would be worth more than a good one.
     From the project's `state`, verdicts being "accepted" | "undecided" | "rejected":
     `heard_verdicts`: {candidate_key: {flight id: verdict}}, `fit_verdicts`: {candidate_key: {`fit_key`: verdict}}."""
     full = STACK_CAP - STACK_FLOOR
     heard_verdicts, fit_verdicts = state.get("heard_verdicts", {}), state.get("fit_verdicts", {})
+    accepted = {p["id"] for p in state.get("passes", []) if p["status"] == "accepted"}
     for c in results["candidates"]:
         c["key"] = candidate_key(c)
         c.setdefault("rank_found", c.get("rank"))
@@ -203,7 +215,8 @@ def rank_candidates(results, state: dict):
             x["verdict"] = fits.get(fit_key(x["pass_id"], x["flight"])) if x.get("flight") else None
             auto = "accepted" if share >= EXPLAINED_AT else "undecided" if share > 0 else "rejected"
             x["status"] = (x["verdict"] or auto) if x.get("flight") else None
-            x["counts"] = {"accepted": 1.0, "undecided": 0.5 * share, "rejected": 0.0}.get(x["verdict"], share)
+            faint = x["pass_id"] not in accepted and share < EXPLAINED_AT
+            x["counts"] = {"accepted": 1.0, "undecided": 0.5 * share, "rejected": 0.0}.get(x["verdict"], 0.0 if faint else share)
         c["fit_counted"] = round(sum(x["counts"] for x in c.get("explains") or []), 2)
         c["explained"] = sum(x["status"] == "accepted" for x in c.get("explains") or [])
         mine = heard_verdicts.get(c["key"], {})
@@ -214,8 +227,9 @@ def rank_candidates(results, state: dict):
             h["status"] = h["verdict"] or GRADE_STATUS.get(h.get("grade"))
             z = h.get("z", 0.0)
             w = {"accepted": full, "undecided": 0.5 * z, "rejected": 0.0}.get(h["status"], z)
+            partly = sum(x["counts"] for x in c.get("explains") or [] if x.get("flight") == h["flight"])
             h["counts"] = (0.0 if h["flight"] in as_pass else 1.0 if h["verdict"] == "accepted"
-                           else round(HEARD_WEIGHT * w / full, 2))
+                           else round(max(0.0, HEARD_WEIGHT * w / full - partly), 2))
         c["heard_counted"] = round(sum(h["counts"] for h in c.get("heard") or []), 2)
         c["combined"] = round(c["fit_counted"] + c["heard_counted"], 2)
     results["candidates"].sort(key=lambda c: (-(c.get("combined") or 0), -(c.get("pair_evidence") or 0),
@@ -231,7 +245,8 @@ def _add_confidence(cands, state):
     spot. Two things tell right from wrong on the test recordings: its lead over the best candidate
     elsewhere, and the share of the accepted passes it explains. How closely the curves fit adds
     nothing to those. Spots can't all be right, so each is then discounted by the chance that one
-    ranked above it, elsewhere, is. Hand verdicts count through both, so they change it at once."""
+    ranked above it, elsewhere, is. Hand verdicts count through both, so they change it at once.
+    With a single accepted pass the two weigh much less (`CONF_ONE_PASS`)."""
     scored = [c for c in cands if c.get("combined") is not None]
     if not scored:
         return
@@ -245,7 +260,8 @@ def _add_confidence(cands, state):
     for c in scored:
         mine = [x for x in c.get("explains") or [] if x["pass_id"] in accepted]
         share.append(sum(x["status"] == "accepted" for x in mine) / max(1, len(mine)))
-    p = 1.0 / (1.0 + np.exp(-(CONF_BASE + CONF_LEAD * lead + CONF_EXPLAINED * np.array(share))))
+    base, w_lead, w_explained = CONF_ONE_PASS if len(accepted) == 1 else (CONF_BASE, CONF_LEAD, CONF_EXPLAINED)
+    p = 1.0 / (1.0 + np.exp(-(base + w_lead * lead + w_explained * np.array(share))))
     for k, c in enumerate(scored):
         c["confidence"] = round(float(p[k] * np.prod(1.0 - p[:k][apart[k, :k]])), 3)
 
@@ -651,6 +667,14 @@ class Project:
                 parts.append((name, meta, t, pos, vel))
         return Legs.from_parts(parts)
 
+    def _start_within(self, slack):
+        """The known start as (unix s, tolerance) if it is tighter than `slack`, the seconds a refining
+        step would otherwise allow around its own start; else None. Those slacks suit a start known
+        to a minute or so, but with a tighter one they would let an answer slide along its flight
+        to a time the recording can't have been made."""
+        s = self.settings
+        return (float(s.start_unix), float(s.start_tol_s)) if s.start_unix is not None and s.start_tol_s < slack else None
+
     def _group(self, results, spec, site, keep, ps, events, report=None):
         """Merge candidates that rest on the same evidence into one, placed by all of it together.
 
@@ -693,8 +717,12 @@ class Project:
             half = float(np.clip(spread + 400.0, 600.0, 2000.0))
             obs = observer_grid(tuple(xy), half, 25.0 if half <= 800 else 50.0, place=site.place)
             dt = max(abs(m["start_unix"] - seed["start_unix"]) for m in members) + 3.0
-            n = int(np.ceil(min(dt, 10.0) / spec.hop))
+            n = int(np.ceil(min(dt, GROUP_SHIFT_S) / spec.hop))
             shifts = np.arange(-n, n + 1)
+            known = self._start_within(GROUP_SHIFT_S)
+            if known:
+                inside = np.abs(seed["start_unix"] + shifts * spec.hop - known[0]) <= known[1]
+                shifts = shifts[inside] if inside.any() else np.zeros(1, dtype=int)
             first = len(jobs)
             for fl, f0 in items.items():
                 jobs.append(("curve", (keep[index[fl]], obs, seed["start_unix"], f0 * (1 + np.arange(-0.015, 0.0151, 0.0025)),
@@ -1008,10 +1036,11 @@ class Project:
                 # The search found the recording's start to a frame for this flight: a point a grid
                 # step away can't move it much, so only REFINE_START_TOL s either side is tried, not the
                 # whole uncertainty again (that was most of the refining with a wide one).
-                fl, found_start = keep[res.flight[r]], float(res.start[r])
+                fl = keep[res.flight[r]]
+                found_start, refine_tol = self._start_within(REFINE_START_TOL) or (float(res.start[r]), REFINE_START_TOL)
                 obs = observer_grid(tuple(grid[res.point[r], :2]), 600.0, 25.0, place=site.place)
                 describe = partial(self._candidate_single, spec, site, obs, fl, p, key, truth, found_start)
-                pending.append((len(candidates), ("start", (fl, obs, events[k], (found_start, REFINE_START_TOL))),
+                pending.append((len(candidates), ("start", (fl, obs, events[k], (found_start, refine_tol))),
                                 describe))
                 candidates.append(None)
         for (slot, _, describe), scored in zip(pending, refine_many(spec, [j for _, j, _ in pending], WORKERS)):
@@ -1042,10 +1071,12 @@ class Project:
                 lat, lon = site.to_latlon(coarse[top])
                 survivors["stack"] = [[round(float(a), 5), round(float(b), 5), round(float(x), 2)]
                                       for a, b, x in zip(lat, lon, sm.score[top])]
+            known = self._start_within(REFINE_PLACE_DRIFT_S)
             for k in places:
                 obs, t0, score, heard = refine_place(keep, coarse[k, :2], sm.start[k], peaks, sm.stats,
                                                      place=site.place, cap=STACK_CAP, floor=STACK_FLOOR,
-                                                     max_dist=s.audible_km * 1000)
+                                                     max_dist=s.audible_km * 1000,
+                                                     start_window=(known[0] - known[1], known[0] + known[1]) if known else None)
                 lat, lon = site.to_latlon(obs)
                 candidates.append(dict(
                     pair="stack", pair_evidence=None, lat=round(float(lat), 6), lon=round(float(lon), 6),
@@ -1160,7 +1191,7 @@ class Project:
             ev_ids, fl_ids = list(v.passes[k]), sorted(set(v.flights[k].tolist()))
             sub = [keep[i] for i in fl_ids]
             obs = observer_grid(xy, *fine, place=site.place)
-            fv = vote_passes(sub, obs, [events[e] for e in ev_ids], (float(v.start[k]), 6.0),
+            fv = vote_passes(sub, obs, [events[e] for e in ev_ids], self._start_within(FINE_VOTE_START_S) or (float(v.start[k]), FINE_VOTE_START_S),
                              passes=Passes(sub, obs, self.settings.audible_km * 1000))
             if len(fv.point):
                 best, t0, total = obs[fv.point[0]], float(fv.start[0]), float(fv.votes[0])

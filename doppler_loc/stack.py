@@ -335,9 +335,10 @@ def stack_at(flights, observers, t0, peaks: Peaks, stats, *, taus=np.arange(-4.0
 
 
 def refine_place(flights, centre, t0, peaks: Peaks, stats, *, place, steps=((1000.0, 200.0), (200.0, 25.0)),
-                 cap=6.0, fine_cap=30.0, **kw):
+                 cap=6.0, fine_cap=30.0, start_window=None, **kw):
     """Close in on the best place around `centre` (x, y): for each (half width, spacing) in `steps`,
-    stack a grid there (starts within +-4 s of the best so far) and move to its best point.
+    stack a grid there (starts within +-4 s of the best so far, and inside `start_window`, (earliest,
+    latest) absolute start, if given) and move to its best point.
 
     The cap that makes flights agree on a place would make every point near it tie once each
     flight is capped, so the grids are scored with the much higher `fine_cap`, and the place found
@@ -352,6 +353,9 @@ def refine_place(flights, centre, t0, peaks: Peaks, stats, *, place, steps=((100
     for half, spacing in steps:
         grid = observer_grid(tuple(centre), half, spacing, place=place)
         taus = np.arange(-4.0, 4.1, 1.0)
+        if start_window is not None:
+            inside = (t0 + taus >= start_window[0] - 1e-6) & (t0 + taus <= start_window[1] + 1e-6)
+            taus = taus[inside] if inside.any() else np.zeros(1)
         total, _ = stack_at(flights, grid, t0, peaks, stats, taus=taus, cap=fine_cap, **kw)
         k, j = np.unravel_index(int(total.argmax()), total.shape)
         obs, centre, t0 = grid[k], grid[k, :2], t0 + taus[j]

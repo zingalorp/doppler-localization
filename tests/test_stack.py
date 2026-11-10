@@ -24,3 +24,9 @@ def test_stacking_finds_the_place_without_any_pass_traced():
     assert sorted(sc.adsb[i].flight_id for i, *_ in heard) == ["N2209K", "N738QA"]
     pitch = {sc.adsb[i].flight_id: f for i, _, f, _ in heard}
     assert abs(pitch["N738QA"] / sc.f0s[0] - 1) < 0.02 and abs(pitch["N2209K"] / sc.f0s[1] - 1) < 0.02
+
+    # From a start a few seconds late it walks back to the true one, unless told to keep near it.
+    late = sc.t_rec + 5.0
+    _, free, *_ = refine_place(sc.adsb, grid[k, :2], late, peaks, sm.stats, place=place)
+    _, held, *_ = refine_place(sc.adsb, grid[k, :2], late, peaks, sm.stats, place=place, start_window=(late - 1.0, late + 1.0))
+    assert abs(free - late) > 1.0 and abs(held - late) <= 1.0
