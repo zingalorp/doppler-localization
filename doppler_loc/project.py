@@ -162,8 +162,8 @@ GRADE_STATUS = {"visible": "accepted", "unsure": "undecided", "absent": "rejecte
 EXPLAINED_AT = 0.6  # a pass is explained when a flight follows this share of its traced line
 # A flight heard on the spectrogram but following no traced line is weaker evidence than one that does.
 # At half, against a whole, every search with a known spot keeps its answer but for the spot's own
-# place within it, while at a whole, unchecked flights outvote traced passes (Chattanooga, once a flight
-# may not count twice).
+# place within it, while at a whole, unchecked flights outvote traced passes (seen on one test site,
+# once a flight may not count twice).
 HEARD_WEIGHT = 0.5
 # How a candidate's confidence grows with its lead and the share of accepted passes it explains
 # (`_add_confidence`). Fitted on all candidates of 19 searches of 13 recordings with known spots; with

@@ -14,7 +14,7 @@ two, so the measure is the best 60 s stretch's share of hits (`best60`), set aga
 (their median, `chance`, and their best, `chance_max`).
 
 On the test sites, curves of passes that flights explain well score 0.8-1.0 and their copies
-0.1-0.3, while West Chicago's heard flights, which can't be seen, score about what their copies do.
+0.1-0.3, while flights heard on one site but not visible there score about what their copies do.
 """
 
 from __future__ import annotations
