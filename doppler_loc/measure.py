@@ -205,13 +205,21 @@ def trace_by_hand(spec: Spectrogram, points, *, near_hz=1.5, far_hz=4.0, hz_per_
     return times, freqs, strength
 
 
+MIN_FIT_FRAMES = 8  # strong frames a line needs for the faint ones to be left out of its fit
+
+
 def fit_flyby(times, freqs, strength=None, *, min_strength=3.0, c=SPEED_OF_SOUND) -> Event:
-    """Fit `straight_flyby` to a traced line, ignoring frames where the line is too faint."""
+    """Fit `straight_flyby` to a traced line, ignoring frames where the line is too faint.
+
+    A line with hardly any frames that strong is fitted whole: a handful of frames can't be fitted,
+    and what was traced is then judged like any other pass rather than stopping detection.
+    """
     times = np.asarray(times, dtype=float)
     freqs = np.asarray(freqs, dtype=float)
     if strength is not None:
         keep = np.asarray(strength) >= min_strength
-        times, freqs = times[keep], freqs[keep]
+        if keep.sum() >= MIN_FIT_FRAMES:
+            times, freqs = times[keep], freqs[keep]
 
     k = max(len(freqs) // 5, 1)
     f_hi, f_lo = np.median(freqs[:k]), np.median(freqs[-k:])

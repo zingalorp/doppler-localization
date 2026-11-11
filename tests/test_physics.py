@@ -64,6 +64,15 @@ def test_fit_flyby_recovers_parameters():
     assert abs(ev.t_heard - 61.0) < 0.5
 
 
+def test_a_line_with_only_one_strong_frame_is_fitted_whole():
+    t = np.arange(0.0, 120.0, 0.5)
+    f = straight_flyby(t, 90.0, 60.0, 1500.0, 61.0, C)
+    strength = np.zeros(t.size)
+    strength[100] = 5.0
+    ev = fit_flyby(t, f, strength)
+    assert abs(ev.t_heard - 61.0) < 0.5 and len(ev.line[0]) == t.size
+
+
 def test_synthesised_tone_follows_model_curve():
     tr = straight_track()
     obs = np.array([0.0, 0.0, 1.5])
