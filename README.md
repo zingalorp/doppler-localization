@@ -184,6 +184,8 @@ worth using there.
   and some in the US) leave passes that no flight can explain.
 - **The flight data must cover low flying.** Far from any receiver, adsb.lol logs airliners overhead but
   not the small planes heard close by. The app warns when that is the case for your area.
+- **It needs logged planes heard close by.** Two or more passes usually pin the place down. With one, it is
+  rarely sure, and with none, any answer it gives is a guess that it shows as unsure.
 - **Turning planes are only partly handled.** Automatic detection assumes straight, steady passes, so
   turning planes are best traced by hand, and the search needs at least one straight pass to pair them with.
 - **The physics is simplified.** The speed of sound is fixed at 343 m/s, and wind is ignored.

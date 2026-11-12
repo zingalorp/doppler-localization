@@ -93,3 +93,10 @@ def test_two_passes_found_without_time():
     left_out = vote_passes(sc.adsb, grid, [fake, e2, e1], (sc.t_rec + 12.0, 30.0), passes=passes,
                            voting=[True, True, False])
     assert left_out.best[2][1] == 0 and all(2 not in ps for ps in left_out.passes)
+
+
+def test_an_area_no_flight_came_near_counts_none_heard():
+    from doppler_loc.search import _HeardTimes
+    obs = np.zeros((3, 3))
+    heard = _HeardTimes(Passes([], obs), 2500.0, pad=10.0)
+    assert heard.count(np.arange(3), np.zeros(3), np.full(3, 60.0)).tolist() == [0, 0, 0]

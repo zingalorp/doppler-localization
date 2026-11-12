@@ -356,7 +356,7 @@ class _HeardTimes:
     def __init__(self, passes: Passes, max_dist, pad):
         k = [i[d < max_dist] for i, d in zip(passes.idx, passes.dist)]
         th = [t[d < max_dist] for t, d in zip(passes.th, passes.dist)]
-        idx, th = np.concatenate(k), np.concatenate(th)
+        idx, th = np.concatenate([np.zeros(0, np.int32), *k]), np.concatenate([np.zeros(0), *th])  # none: no flights there
         self.t_ref = (th.min() if th.size else 0.0) - pad
         self.span = (th.max() - self.t_ref if th.size else 0.0) + pad
         self.keys = np.sort(idx * self.span + (th - self.t_ref))

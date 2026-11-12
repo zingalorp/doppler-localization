@@ -290,9 +290,17 @@ RELEASES = "https://api.github.com/repos/adsblol/globe_history_{year}/releases/t
 def download_day(date, day_dir, *, progress=None) -> list[Path]:
     """Fetch adsb.lol's archive for `date` ("YYYY-MM-DD", UTC) into `day_dir` as prod.tar.aa, .ab, ...
 
-    About 4 GB a day, published the following day. Parts already there at full size are kept.
+    About 4 GB a day, published the following day. Parts already there at full size are kept, and
+    once a day is all there it is not asked about again: GitHub lets a computer ask only 60 times
+    an hour, which a batch of recordings from one day would otherwise use up.
     `progress(done_bytes, total_bytes)` is called as it goes.
     """
+    day_dir = Path(day_dir)
+    listing = day_dir / "assets.json"
+    if listing.exists():
+        have = [(day_dir / f"prod.tar.{n.rsplit('.', 1)[1]}", size) for n, size in json.loads(listing.read_text()).items()]
+        if all(p.exists() and p.stat().st_size == size for p, size in have):
+            return [p for p, _ in have]
     year = date[:4]
     try:
         with urllib.request.urlopen(RELEASES.format(year=year, tag=date.replace("-", ".")), timeout=60) as r:
@@ -307,7 +315,6 @@ def download_day(date, day_dir, *, progress=None) -> list[Path]:
             raise FileNotFoundError(f"adsb.lol hasn't published {date} yet: each day appears around 03:30 UTC the "
                                     f"next day, so try again after {ready:%Y-%m-%d %H:%M} UTC")
         raise FileNotFoundError(f"adsb.lol has no archive for {date}")
-    day_dir = Path(day_dir)
     day_dir.mkdir(parents=True, exist_ok=True)
     total = sum(a["size"] for a in assets)
     done = 0
@@ -326,6 +333,7 @@ def download_day(date, day_dir, *, progress=None) -> list[Path]:
                 if progress:
                     progress(done, total)
         tmp.replace(path)  # over a part left short by an earlier run (rename refuses that on Windows)
+    listing.write_text(json.dumps({a["name"]: a["size"] for a in assets}))
     return out
 
 
